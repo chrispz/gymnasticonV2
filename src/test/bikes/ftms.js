@@ -197,3 +197,36 @@ test('after an idle release, a console that stays awake past its sleep timeout m
   t.ok(logs.includes('someone is riding'), 'reconnects without waiting for sleep');
   t.end();
 });
+
+test('FtmsBikeClient.connect() fails when the bike drops during service discovery', async t => {
+  resetIdleRest();
+  const noble = new EventEmitter();
+  noble.startScanningAsync = async () => {};
+  noble.stopScanning = () => {};
+  const peripheral = new EventEmitter();
+  peripheral.address = 'e0:df:01:c6:26:80';
+  peripheral.advertisement = {localName: 'iConsole+0031'};
+  peripheral.connectAsync = async () => {};
+  peripheral.discoverSomeServicesAndCharacteristicsAsync = () => new Promise(() => {}); // noble never settles after a drop
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    const client = new FtmsBikeClient(noble, createFtmsFilter('E0:DF:01:C6:26:80'));
+    let disconnectEvents = 0;
+    client.on('disconnect', () => disconnectEvents++);
+    const pending = client.connect();
+    setTimeout(() => noble.emit('discover', peripheral), 0);
+    await new Promise(r => setTimeout(r, 10));
+    peripheral.emit('disconnect');
+    const outcome = await Promise.race([
+      pending.then(() => 'resolved', () => 'rejected'),
+      new Promise(r => setTimeout(() => r('hung'), 200)),
+    ]);
+    t.equal(outcome, 'rejected', 'connect rejects so the app can retry');
+    t.equal(disconnectEvents, 1, 'disconnect still reported to the app');
+    t.equal(client.state, 'disconnected', 'client is disconnected');
+  } finally {
+    console.log = originalLog;
+  }
+  t.end();
+});

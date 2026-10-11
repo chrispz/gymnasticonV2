@@ -247,7 +247,8 @@ export class FtmsBikeClient extends EventEmitter {
   }
 
   async disconnect() {
-    if (this.state === 'connecting' && this.abortConnect) {
+    // A pending connect can outlive 'connecting' (e.g. the bike dropped mid-setup), so key on abortConnect.
+    if (this.abortConnect) {
       if (this.scanSeen && !this.peripheral) {
         console.log(`[ftms] scan aborted without a match: ${this.scanSeen.events} advertisement(s) from ${this.scanSeen.devices.size} device(s)`);
       }
@@ -275,6 +276,8 @@ export class FtmsBikeClient extends EventEmitter {
       return;
     }
     this.state = 'disconnected';
+    // Dropped during setup: noble never settles the pending GATT discovery, so fail the connect.
+    this.abortConnect?.();
     let address;
     if (this.peripheral) {
       this.peripheral.off('disconnect', this.onDisconnect);
