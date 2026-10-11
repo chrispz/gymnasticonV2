@@ -8,6 +8,7 @@ import '../src/test/bikes/ic4.js';
 import '../src/test/bikes/keiser.js';
 import '../src/test/bikes/peloton.js';
 import '../src/test/util/ble-scan.js';
+import '../src/test/util/ble-server.js';
 import '../src/test/util/dropout-filter.js';
 import '../src/test/util/mac-address.js';
 import '../src/test/util/runtime-regressions.js';

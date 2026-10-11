@@ -1059,11 +1059,17 @@ export class App {
 
     // Teaching note: per the CSC spec, "last event time" is the time of the
     // most recent revolution event, not the timestamp of the packet itself.
+    // Back-date to when the last whole revolution was crossed; stamping the sample
+    // time quantizes events to the stats interval and makes cadence jump around.
     if (nextCrankRevolutions !== this.crank.revolutions) {
-      this.kinematics.lastCrankEventTimestamp = now;
+      const crankRate = safeCadence / 60;
+      const overshoot = this.kinematics.crankRevolutions - Math.floor(this.kinematics.crankRevolutions);
+      this.kinematics.lastCrankEventTimestamp = crankRate > 0 ? now - overshoot / crankRate : now;
     }
     if (nextWheelRevolutions !== this.wheel.revolutions) {
-      this.kinematics.lastWheelEventTimestamp = now;
+      const wheelRate = circumference > 0 ? safeSpeed / circumference : 0;
+      const overshoot = this.kinematics.wheelRevolutions - Math.floor(this.kinematics.wheelRevolutions);
+      this.kinematics.lastWheelEventTimestamp = wheelRate > 0 ? now - overshoot / wheelRate : now;
     }
 
     this.crank = { // Build the BLE-friendly crank snapshot (16-bit revolutions + last event timestamp in seconds).
@@ -1093,7 +1099,7 @@ export class App {
     const cadence = this.simulation.cadence ?? this.currentCadence; // Use simulated cadence when bot mode drives the app.
     const speed = estimateSpeedMps(cadence, this.speedOptions); // Estimate speed for simulation strokes so CSC stays alive.
     this.currentCadence = cadence; // Track cadence for ANT+/BLE ping intervals.
-    this.integrateKinematics(cadence, speed, timestamp); // Update cumulative crank/wheel counters based on the simulated stroke.
+    this.integrateKinematics(cadence, speed, timestamp / 1000); // Simulation timestamps are ms; kinematics run in seconds like nowSeconds().
     this.logger.log(`pedal stroke [timestamp=${timestamp} revolutions=${this.crank.revolutions} power=${this.power}W]`);
     this.publishTelemetry(); // Push the updated measurement to BLE/ANT clients.
   }

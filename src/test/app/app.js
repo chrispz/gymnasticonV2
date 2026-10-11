@@ -103,8 +103,58 @@ test('App.integrateKinematics() keeps CSC event timestamps stable until revoluti
     t.ok(app.crank.revolutions > 0, 'crank revolutions advance when cadence is positive');
     t.ok(app.wheel.revolutions > 0, 'wheel revolutions advance when speed is positive');
     t.equal(app.crank.timestamp, 111, 'crank timestamp moves to the sample time when a crank revolution occurs');
-    t.equal(app.wheel.timestamp, 111, 'wheel timestamp moves to the sample time when a wheel revolution occurs');
+    t.ok(app.wheel.timestamp > 110 && app.wheel.timestamp <= 111, 'wheel timestamp is back-dated to the last whole revolution within the sample');
   } finally {
+    destroyTestApp(app);
+  }
+
+  t.end();
+});
+
+test('App.integrateKinematics() yields steady cadence from samples that do not align with revolutions', (t) => {
+  const app = createTestApp();
+  try {
+    const derived = [];
+    let prev = null;
+    for (let i = 0; i <= 20; i++) {
+      app.integrateKinematics(80, 0, 100 + i * 0.5);
+      if (prev && prev.timestamp > 0 && app.crank.revolutions !== prev.revolutions) {
+        derived.push((app.crank.revolutions - prev.revolutions) / (app.crank.timestamp - prev.timestamp) * 60);
+      }
+      prev = {...app.crank};
+    }
+    t.ok(derived.length > 5, 'crank events were produced');
+    t.ok(derived.every(rpm => Math.abs(rpm - 80) < 0.01), 'receivers derive 80 rpm from every event pair');
+  } finally {
+    destroyTestApp(app);
+  }
+
+  t.end();
+});
+
+test('App.onPedalStroke() uses the same clock as bike stats so crank events stay monotonic', (t) => {
+  const app = createTestApp();
+  try {
+    app.simulation = {cadence: 80};
+    app.publishTelemetry = () => {};
+    let prev = null;
+    let ok = true;
+    for (let i = 1; i <= 20; i++) {
+      const seconds = 1000 + i * 0.25;
+      if (i % 2) {
+        app.integrateKinematics(80, 0, seconds);
+      } else {
+        app.onPedalStroke(seconds * 1000); // Simulation emits ms timestamps.
+      }
+      if (prev && prev.timestamp > 0 && app.crank.revolutions !== prev.revolutions) {
+        const rpm = (app.crank.revolutions - prev.revolutions) / (app.crank.timestamp - prev.timestamp) * 60;
+        ok = ok && Math.abs(rpm - 80) < 0.01;
+      }
+      prev = {...app.crank};
+    }
+    t.ok(ok, 'cadence derived from crank events stays at 80 rpm');
+  } finally {
+    app.pingInterval.cancel();
     destroyTestApp(app);
   }
 

@@ -21,6 +21,9 @@ export class BleServer extends EventEmitter {
 
     // Promisify bleno methods for async/await usage
     this.bleno.startAdvertisingAsync = util.promisify(this.bleno.startAdvertising);
+    if (typeof this.bleno.startAdvertisingWithEIRData === 'function') {
+      this.bleno.startAdvertisingWithEIRDataAsync = util.promisify(this.bleno.startAdvertisingWithEIRData);
+    }
     this.bleno.stopAdvertisingAsync = util.promisify(this.bleno.stopAdvertising);
     this.bleno.setServicesAsync = util.promisify(this.bleno.setServices);
   }
@@ -49,13 +52,23 @@ export class BleServer extends EventEmitter {
     }
 
     try {
-      await this.bleno.startAdvertisingAsync(this.name, this.uuids);
+      await this.advertise();
       await this.bleno.setServicesAsync(this.services);
     } catch (err) {
       await this.cleanupFailedStart();
       throw err;
     }
     this.state = 'started';
+  }
+
+  /** Start advertising with a complete local name, falling back to bleno's default payload. */
+  async advertise() {
+    const eir = buildAdvertisingData(this.name, this.uuids);
+    if (eir && this.bleno.startAdvertisingWithEIRDataAsync) {
+      await this.bleno.startAdvertisingWithEIRDataAsync(eir.advertisement, eir.scanResponse);
+    } else {
+      await this.bleno.startAdvertisingAsync(this.name, this.uuids);
+    }
   }
 
   async cleanupFailedStart() {
@@ -104,4 +117,35 @@ export class BleServer extends EventEmitter {
     this.connectionCount = Math.max(0, this.connectionCount - 1);
     this.emit('disconnect', address);
   }
+}
+
+/**
+ * Build advertising/scan-response payloads with a Complete Local Name.
+ * bleno's startAdvertising() only sends a Shortened Local Name in the scan
+ * response, which Garmin devices don't display. Returns null when the
+ * payload can't be built (e.g. 128-bit UUIDs), so callers fall back to bleno.
+ */
+export function buildAdvertisingData(name, uuids = []) {
+  if (!uuids.every(uuid => /^[0-9a-f]{4}$/i.test(uuid))) {
+    return null;
+  }
+  const flags = Buffer.from([0x02, 0x01, 0x06]); // LE General Discoverable, BR/EDR not supported
+  const uuidField = uuids.length
+    ? Buffer.concat([Buffer.from([1 + 2 * uuids.length, 0x03]), ...uuids.map(uuid => {
+      const buf = Buffer.alloc(2);
+      buf.writeUInt16LE(parseInt(uuid, 16));
+      return buf;
+    })])
+    : Buffer.alloc(0);
+  const nameBytes = Buffer.from(name || '', 'utf8');
+  const nameField = nameBytes.length ? Buffer.concat([Buffer.from([1 + nameBytes.length, 0x09]), nameBytes]) : Buffer.alloc(0);
+  if (nameField.length > 31) {
+    return null;
+  }
+  let advertisement = Buffer.concat([flags, uuidField]);
+  // Also put the name in the advertisement itself for scanners that never request a scan response.
+  if (advertisement.length + nameField.length <= 31) {
+    advertisement = Buffer.concat([advertisement, nameField]);
+  }
+  return {advertisement, scanResponse: nameField};
 }

@@ -185,7 +185,7 @@ export class GymnasticonServer extends BleServer {
           });
         });
       } else {
-        await this.bleno.startAdvertisingAsync(this.name, this.uuids);
+        await this.advertise();
       }
 
       await this.bleno.setServicesAsync(this.services); // Commit the service list to the adapter now that advertising is live.
