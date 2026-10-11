@@ -161,6 +161,46 @@ test('App.onPedalStroke() uses the same clock as bike stats so crank events stay
   t.end();
 });
 
+test('App.run() refreshes the bike health metric as soon as the bike connects', async (t) => {
+  const order = [];
+  const app = createTestApp();
+  try {
+    app.healthMonitor.recordMetric = (name) => order.push(`record:${name}`);
+    app.createBikeClient = async () => {
+      const bike = new EventEmitter();
+      bike.address = 'AA:BB:CC:DD:EE:FF';
+      bike.connect = async () => {};
+      bike.disconnect = async () => {};
+      return bike;
+    };
+    app.server = {
+      async start() { order.push('server-start'); },
+      async stop() {},
+      ensureCscCapabilities() {},
+      updatePower() {},
+      updateCsc() {},
+      updateHeartRate() {},
+    };
+    app.logger = {log() {}, warn() {}, error() {}};
+    app.attachNobleDiagnostics = () => {};
+    app.ensureBluetoothPoweredOn = async () => {};
+    app.startOptionalSensors = async () => {};
+    app.waitForRestartSignal = async () => { app.keepRunning = false; };
+
+    await app.run();
+
+    const recorded = order.indexOf('record:bikeStats');
+    t.ok(recorded !== -1, 'bikeStats metric recorded on connect');
+    t.ok(recorded < order.indexOf('server-start'), 'recorded before BLE startup, so a stale check cannot fire first');
+  } finally {
+    app.pingInterval.cancel();
+    app.statsTimeout.cancel();
+    destroyTestApp(app);
+  }
+
+  t.end();
+});
+
 test('App.startOptionalSensors() delays and serializes optional speed/cadence discovery', async (t) => {
   const app = createTestApp();
   const order = [];

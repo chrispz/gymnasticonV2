@@ -811,6 +811,8 @@ export class App {
           await this.bike.connect(); // Begin scanning or connecting based on the specific bike implementation.
           this.connectTimeout.cancel(); // Clear the watchdog because the connect phase finished successfully.
           this.logger.log(`bike connected ${this.bike.address}`); // Log the MAC so users can confirm which console paired.
+          // Fresh timestamp so a stale-telemetry check can't fire before the first stats after a quick reconnect.
+          this.healthMonitor?.recordMetric('bikeStats', { power: 0, cadence: 0 });
           // Teaching note: only advertise once the bike is connected so we do
           // not broadcast phantom sensors while idle.
           await this.ensureServerStarted('bike-connected');
