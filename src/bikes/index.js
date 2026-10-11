@@ -55,7 +55,10 @@ function createIc8BikeClient(_options, noble) { // Factory for Schwinn IC8 / Bow
 }
 
 function createFtmsBikeClient(options, noble) { // Factory for generic FTMS bikes, optionally pinned to a MAC address.
-  return new FtmsBikeClient(noble, createFtmsFilter(options.ftmsAddress));
+  return new FtmsBikeClient(noble, createFtmsFilter(options.ftmsAddress), {
+    idleTimeoutMs: (options.ftmsIdleTimeout ?? 0) * 1000,
+    consoleSleepMs: (options.ftmsConsoleSleep ?? 0) * 1000,
+  });
 }
 
 function createKeiserBikeClient(options, noble) { // Factory for Keiser bikes that broadcast as beacons.

@@ -23,6 +23,8 @@ export const defaults = {
 
   // generic FTMS bike options
   ftmsAddress: undefined,        // optional MAC filter; otherwise any FTMS advertiser
+  ftmsIdleTimeout: 600,          // seconds without pedalling before releasing the bike
+  ftmsConsoleSleep: 240,         // seconds the console stays awake once released (SP900: ~238s measured)
   
 
   // peloton bike options

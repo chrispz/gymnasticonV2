@@ -1,7 +1,7 @@
 import {EventEmitter} from 'events';
 
 import test from '../support/tape.js';
-import {parseIndoorBikeData, matchesFtmsName, createFtmsFilter, FtmsBikeClient} from '../../bikes/ftms.js';
+import {parseIndoorBikeData, matchesFtmsName, createFtmsFilter, FtmsBikeClient, resetIdleRest} from '../../bikes/ftms.js';
 import {createBikeClient} from '../../bikes/index.js';
 
 // Captured from an Abilica SP900 (iConsole+0031): flags 0x1FFE, all optional fields present.
@@ -124,5 +124,76 @@ test('autodetect picks the ftms profile for iConsole+ ahead of ic8', async t => 
   } finally {
     console.log = originalLog;
   }
+  t.end();
+});
+
+function idleTestClient(noble, options) {
+  const client = new FtmsBikeClient(noble, p => p.address === 'bike', options);
+  client.state = 'connected';
+  client.lastActive = Date.now();
+  client.disconnect = async () => { client.state = 'disconnected'; client.released = true; };
+  return client;
+}
+
+const IDLE_FRAME = Buffer.from('fe1f00000000000000000000000100000000000000000000000000000000', 'hex');
+const ACTIVE_FRAME = Buffer.from('fe1f940700006800000075010004003500000002000000000000008f040000', 'hex');
+
+test('FtmsBikeClient releases the bike after the idle timeout, but not while pedalling', async t => {
+  resetIdleRest();
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    const client = idleTestClient(new EventEmitter(), {idleTimeoutMs: 20});
+    await new Promise(r => setTimeout(r, 30));
+    client.onReceive(ACTIVE_FRAME);
+    t.notOk(client.released, 'pedalling resets the idle timer');
+    await new Promise(r => setTimeout(r, 30));
+    client.onReceive(IDLE_FRAME);
+    t.ok(client.released, 'released after idle timeout');
+  } finally {
+    console.log = originalLog;
+    resetIdleRest();
+  }
+  t.end();
+});
+
+async function restScenario(t, {keepAdvertising}) {
+  resetIdleRest();
+  const noble = new EventEmitter();
+  noble.startScanningAsync = async () => {};
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (...a) => logs.push(a.join(' '));
+  try {
+    const opts = {idleTimeoutMs: 1, consoleSleepMs: 100, consoleQuietMs: 40};
+    const idle = idleTestClient(noble, opts);
+    await new Promise(r => setTimeout(r, 5));
+    idle.onReceive(IDLE_FRAME);
+    const next = new FtmsBikeClient(noble, p => p.address === 'bike', opts);
+    next.state = 'connecting';
+    const advert = setInterval(() => keepAdvertising() && noble.emit('discover', {address: 'bike', advertisement: {}}), 10);
+    const started = Date.now();
+    await next.waitForConsoleSleep();
+    clearInterval(advert);
+    return {elapsed: Date.now() - started, logs: logs.join('\n')};
+  } finally {
+    console.log = originalLog;
+    resetIdleRest();
+  }
+}
+
+test('after an idle release, reconnecting waits until the console stops advertising', async t => {
+  let advertise = true;
+  setTimeout(() => { advertise = false; }, 60);
+  const {elapsed, logs} = await restScenario(t, {keepAdvertising: () => advertise});
+  t.ok(elapsed >= 60, 'kept waiting while the console was awake');
+  t.ok(logs.includes('console is asleep'), 'resumes once the console sleeps');
+  t.end();
+});
+
+test('after an idle release, a console that stays awake past its sleep timeout means someone is riding', async t => {
+  const {elapsed, logs} = await restScenario(t, {keepAdvertising: () => true});
+  t.ok(elapsed >= 100, 'waited for the console sleep timeout');
+  t.ok(logs.includes('someone is riding'), 'reconnects without waiting for sleep');
   t.end();
 });

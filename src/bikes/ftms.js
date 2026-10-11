@@ -66,6 +66,17 @@ export function parseIndoorBikeData(data) {
   return result;
 }
 
+// Consoles stay awake while connected. After an idle release we hold off reconnecting
+// until the console sleeps, or until it outlasts its own sleep timeout (someone is riding).
+// Module-level so it survives the app recreating the client on each connect attempt.
+const rest = {since: null, lastSeen: 0, announced: false};
+
+export function resetIdleRest() {
+  rest.since = null;
+  rest.lastSeen = 0;
+  rest.announced = false;
+}
+
 /**
  * Generic client for bikes exposing the standard Fitness Machine Service.
  */
@@ -74,10 +85,18 @@ export class FtmsBikeClient extends EventEmitter {
    * @param {Noble} noble
    * @param {function} filter - peripheral filter used while scanning
    */
-  constructor(noble, filter = matchesFtmsName) {
+  /**
+   * @param {object} [options]
+   * @param {number} [options.idleTimeoutMs] - release the bike after this long without power/cadence (0 disables)
+   * @param {number} [options.consoleSleepMs] - how long the console stays awake on its own once released
+   */
+  constructor(noble, filter = matchesFtmsName, {idleTimeoutMs = 0, consoleSleepMs = 0, consoleQuietMs = 30000} = {}) {
     super();
     this.noble = noble;
     this.filter = filter;
+    this.idleTimeoutMs = idleTimeoutMs;
+    this.consoleSleepMs = consoleSleepMs;
+    this.consoleQuietMs = consoleQuietMs; // no advertisements for this long = console asleep
     this.state = 'disconnected';
     this.stats = {power: 0, cadence: 0};
     this.onReceive = this.onReceive.bind(this);
@@ -105,6 +124,9 @@ export class FtmsBikeClient extends EventEmitter {
   }
 
   async establish() {
+    if (rest.since) {
+      await this.waitForConsoleSleep();
+    }
     // No service UUID filter: many consoles only expose FTMS after connecting, not in their advertisement.
     // Duplicates on: with them off the controller reports each device once, which an earlier probe scan may consume.
     this.scanSeen = {devices: new Set(), events: 0};
@@ -142,7 +164,42 @@ export class FtmsBikeClient extends EventEmitter {
     await this.indoorBikeData.subscribeAsync();
     this.throwIfAborted(peripheral);
 
+    this.lastActive = Date.now();
     this.state = 'connected';
+  }
+
+  waitForConsoleSleep() {
+    if (!rest.announced) {
+      console.log('[ftms] bike was released while idle; waiting for its console to sleep before reconnecting');
+      rest.announced = true;
+    }
+    return new Promise(resolve => {
+      const onDiscover = p => {
+        if (this.filter(p)) {
+          rest.lastSeen = Date.now();
+        }
+      };
+      const check = () => {
+        const now = Date.now();
+        const asleep = now - rest.lastSeen >= this.consoleQuietMs;
+        const stillAwake = now - rest.since >= this.consoleSleepMs + this.consoleQuietMs;
+        if (!asleep && !stillAwake && this.state === 'connecting') {
+          return;
+        }
+        clearInterval(timer);
+        this.noble.removeListener('discover', onDiscover);
+        if (asleep || stillAwake) {
+          console.log(asleep
+            ? '[ftms] console is asleep; will reconnect when it wakes'
+            : '[ftms] console stayed awake past its sleep timeout; someone is riding, reconnecting');
+          resetIdleRest();
+        }
+        resolve();
+      };
+      this.noble.on('discover', onDiscover);
+      const timer = setInterval(check, Math.min(1000, this.consoleQuietMs / 4));
+      Promise.resolve(this.noble.startScanningAsync?.([], true)).catch(() => {});
+    });
   }
 
   throwIfAborted(peripheral) {
@@ -172,6 +229,21 @@ export class FtmsBikeClient extends EventEmitter {
       }
     }
     this.emit('stats', {...this.stats, cadence: Math.round(this.stats.cadence)});
+    this.checkIdle();
+  }
+
+  checkIdle() {
+    const now = Date.now();
+    if (this.stats.power > 0 || this.stats.cadence > 0) {
+      this.lastActive = now;
+      return;
+    }
+    if (this.idleTimeoutMs > 0 && this.state === 'connected' && now - this.lastActive >= this.idleTimeoutMs) {
+      console.log(`[ftms] no pedalling for ${Math.round(this.idleTimeoutMs / 60000)} min; releasing the bike so its console can sleep`);
+      rest.since = now;
+      rest.lastSeen = now;
+      this.disconnect();
+    }
   }
 
   async disconnect() {

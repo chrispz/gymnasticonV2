@@ -50,6 +50,16 @@ export const options = {
   'ftms-address': {
     describe: '<macaddr> optional MAC filter for generic FTMS bikes',
   },
+  'ftms-idle-timeout': {
+    describe: '<seconds> release an idle FTMS bike so its console can sleep (0 disables)',
+    type: 'number',
+    default: defaults.ftmsIdleTimeout,
+  },
+  'ftms-console-sleep': {
+    describe: '<seconds> how long the FTMS console stays awake on its own once released',
+    type: 'number',
+    default: defaults.ftmsConsoleSleep,
+  },
   'peloton-path': {
     describe: '<path> usb serial device path',
     type: 'string',
