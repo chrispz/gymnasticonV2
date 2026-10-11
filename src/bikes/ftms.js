@@ -1,5 +1,5 @@
 import {EventEmitter} from 'events';
-import {scan, createAddressFilter} from '../util/ble-scan.js';
+import {scan, createAddressFilter, stopScanningSafely} from '../util/ble-scan.js';
 import {macAddress} from '../util/mac-address.js';
 import {loadDependency, toDefaultExport} from '../util/optional-deps.js';
 
@@ -93,16 +93,46 @@ export class FtmsBikeClient extends EventEmitter {
       throw new Error('Already connected');
     }
     this.state = 'connecting';
-    this.peripheral = await scan(this.noble, [FTMS_SERVICE_UUID], this.filter, {allowDuplicates: false, active: true});
-    if (!this.peripheral) {
+    // disconnect() rejects this so the app's connect watchdog can interrupt a scan that never matches.
+    const aborted = new Promise((_, reject) => {
+      this.abortConnect = () => reject(new Error('FTMS bike connect aborted'));
+    });
+    try {
+      await Promise.race([this.establish(), aborted]);
+    } finally {
+      this.abortConnect = null;
+    }
+  }
+
+  async establish() {
+    // No service UUID filter: many consoles only expose FTMS after connecting, not in their advertisement.
+    // Duplicates on: with them off the controller reports each device once, which an earlier probe scan may consume.
+    this.scanSeen = {devices: new Set(), events: 0};
+    const peripheral = await scan(this.noble, null, this.filter, {
+      allowDuplicates: true,
+      active: true,
+      // The HCI socket addon connects via a kernel L2CAP socket, which needs advertisements while connecting.
+      stopScanOnMatch: false,
+      onDiscovery: p => {
+        this.scanSeen.events += 1;
+        this.scanSeen.devices.add(p?.address);
+      },
+    });
+    this.throwIfAborted(peripheral);
+    if (!peripheral) {
       this.state = 'disconnected';
       throw new Error('Unable to find FTMS bike');
     }
-    await this.peripheral.connectAsync({timeout: 10000});
-    this.peripheral.on('disconnect', this.onDisconnect);
+    console.log(`[ftms] found ${peripheral.advertisement?.localName ?? 'unnamed'} (${peripheral.address}); connecting`);
+    this.peripheral = peripheral;
+    await peripheral.connectAsync();
+    await stopScanningSafely(this.noble);
+    this.throwIfAborted(peripheral);
+    peripheral.on('disconnect', this.onDisconnect);
 
-    const {characteristics} = await this.peripheral.discoverSomeServicesAndCharacteristicsAsync(
+    const {characteristics} = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
       [FTMS_SERVICE_UUID], [INDOOR_BIKE_DATA_UUID]);
+    this.throwIfAborted(peripheral);
     const [indoorBikeData] = characteristics;
     if (!indoorBikeData) {
       throw new Error('FTMS Indoor Bike Data characteristic not found');
@@ -110,8 +140,16 @@ export class FtmsBikeClient extends EventEmitter {
     this.indoorBikeData = indoorBikeData;
     this.indoorBikeData.on('data', this.onReceive);
     await this.indoorBikeData.subscribeAsync();
+    this.throwIfAborted(peripheral);
 
     this.state = 'connected';
+  }
+
+  throwIfAborted(peripheral) {
+    if (this.state !== 'connecting') {
+      peripheral?.disconnect?.();
+      throw new Error('FTMS bike connect aborted');
+    }
   }
 
   get address() {
@@ -137,7 +175,15 @@ export class FtmsBikeClient extends EventEmitter {
   }
 
   async disconnect() {
+    if (this.state === 'connecting' && this.abortConnect) {
+      if (this.scanSeen && !this.peripheral) {
+        console.log(`[ftms] scan aborted without a match: ${this.scanSeen.events} advertisement(s) from ${this.scanSeen.devices.size} device(s)`);
+      }
+      await stopScanningSafely(this.noble);
+      this.abortConnect();
+    }
     if (this.state === 'disconnected' || !this.peripheral) {
+      this.state = 'disconnected';
       return;
     }
     this.state = 'disconnecting';
@@ -173,10 +219,12 @@ export class FtmsBikeClient extends EventEmitter {
 }
 
 /**
- * Build the scan filter: MAC address when configured, else any FTMS advertiser.
+ * Build the scan filter: MAC address when configured, else any FTMS advertiser or known console name.
  */
 export function createFtmsFilter(address) {
-  return address ? createAddressFilter(address) : advertisesFtms;
+  return address
+    ? createAddressFilter(address)
+    : peripheral => advertisesFtms(peripheral) || matchesFtmsName(peripheral);
 }
 
 function advertisesFtms(peripheral) {

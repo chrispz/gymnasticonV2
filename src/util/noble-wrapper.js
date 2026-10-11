@@ -4,9 +4,15 @@ import {execSync} from 'child_process';
 import path from 'path';
 import {loadDependency, toDefaultExport} from './optional-deps.js';
 import {normalizeAdapterId} from './adapter-id.js';
+import {patchHciFilterSize} from './hci-filter-fix.js';
 
 const requireFromWrapper = createRequire(import.meta.url);
 const NOBLE_REQUEST = '@abandonware/noble';
+const ATT_CID = 0x0004;
+const ATT_OP_MTU_REQ = 0x02;
+const ATT_OP_MTU_RESP = 0x03;
+const ATT_ECODE_REQ_NOT_SUPP = 0x06;
+const NOBLE_SERVER_MTU = 256; // matches the MTU noble requests itself
 
 function clearDependencyCache(request) {
   const entryPath = requireFromWrapper.resolve(request);
@@ -136,6 +142,41 @@ function patchNobleHciInit(noble) {
   noble.__gymnasticonHciInitPatched = true;
 }
 
+// NOBLE_MULTI_ROLE makes noble ignore ATT requests from peers so bleno can answer on
+// its own links, but noble's Gatt only exists for links noble initiated, which bleno
+// never answers. An unanswered request (e.g. the bike's MTU exchange) hits the 30s ATT
+// timeout and the peer stops sending notifications.
+function patchNobleCentralAttRequests() {
+  let Gatt;
+  try {
+    Gatt = requireFromWrapper(`${NOBLE_REQUEST}/lib/hci-socket/gatt.js`);
+  } catch (_error) {
+    return;
+  }
+  if (!Gatt?.prototype || Gatt.prototype.__gymnasticonAttRequestsPatched) {
+    return;
+  }
+  const originalOnAclStreamData = Gatt.prototype.onAclStreamData;
+  Gatt.prototype.onAclStreamData = function patchedOnAclStreamData(cid, data) {
+    const opcode = data?.[0];
+    const isEcho = this._currentCommand && data.equals(this._currentCommand.buffer);
+    // Even opcodes are requests; bit 6 marks commands, which take no response.
+    if (process.env.NOBLE_MULTI_ROLE && cid === ATT_CID && !isEcho && opcode % 2 === 0 && !(opcode & 0x40)) {
+      if (opcode === ATT_OP_MTU_REQ) {
+        const response = Buffer.alloc(3);
+        response.writeUInt8(ATT_OP_MTU_RESP, 0);
+        response.writeUInt16LE(NOBLE_SERVER_MTU, 1);
+        this.writeAtt(response);
+      } else {
+        this.writeAtt(this.errorResponse(opcode, 0x0000, ATT_ECODE_REQ_NOT_SUPP));
+      }
+      return;
+    }
+    return originalOnAclStreamData.call(this, cid, data);
+  };
+  Gatt.prototype.__gymnasticonAttRequestsPatched = true;
+}
+
 function patchNobleUnknownStateScan(noble) {
   if (!noble || noble.__gymnasticonUnknownStateScanPatched) {
     return;
@@ -220,6 +261,8 @@ export const initializeBluetooth = async (adapter = 'hci0', options = {}) => {
       }
     }
 
+    patchHciFilterSize(noble?._bindings?._hci);
+    patchNobleCentralAttRequests();
     patchNobleMtu(noble);
     patchNobleHciInit(noble);
     patchNobleUnknownStateScan(noble);

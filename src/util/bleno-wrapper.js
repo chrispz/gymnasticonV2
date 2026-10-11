@@ -2,6 +2,7 @@ import {EventEmitter} from 'events';
 import {createRequire} from 'module';
 import path from 'path';
 import {loadDependency, toDefaultExport} from './optional-deps.js';
+import {patchHciFilterSize} from './hci-filter-fix.js';
 import {normalizeAdapterId} from './adapter-id.js';
 
 const requireFromWrapper = createRequire(import.meta.url);
@@ -55,6 +56,7 @@ export const initializeBleno = async (adapter = 'hci0', options = {}) => {
         bleno = emitter;
       }
     }
+    patchHciFilterSize(bleno?._bindings?._hci);
     // Teaching note: trigger bleno init while the adapter env var is set so
     // each instance binds to the intended HCI device.
     if (!usingStub && bleno && !bleno.initialized && typeof bleno.once === 'function') {

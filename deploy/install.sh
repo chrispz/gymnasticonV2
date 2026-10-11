@@ -110,21 +110,32 @@ remove_existing_node() {
     sudo apt-get update # refresh apt metadata after repo changes
 }
 
-install_node_armv6() {
-    local archive="node-v${NODE_VERSION}-linux-armv6l.tar.xz" # Node tarball name for armv6 boards
-    local url="https://unofficial-builds.nodejs.org/download/release/v${NODE_VERSION}/${archive}" # unofficial archive that still publishes armv6 builds
-    local tmpdir # temporary staging directory for the download
-    tmpdir="$(mktemp -d)" # create the temp directory
-    echo "Downloading Node.js ${NODE_VERSION} for armv6l..." # log progress for the user
-    curl -fsSL "${url}" -o "${tmpdir}/${archive}" # fetch the tarball quietly but fail on errors
-    echo "Installing Node.js into /usr/local..." # announce the install destination
-    sudo tar --strip-components=1 -xJf "${tmpdir}/${archive}" -C /usr/local # unpack Node into /usr/local stripping the top-level folder
-    rm -rf "${tmpdir}" # clean up the temporary files
+install_node_tarball() {
+    local node_arch="$1" # Node's name for the target architecture (armv6l, armv7l, arm64, x64)
+    local base_url="$2" # release directory holding the tarball and SHASUMS256.txt
+    local archive="node-v${NODE_VERSION}-linux-${node_arch}.tar.xz"
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    echo "Downloading Node.js ${NODE_VERSION} for ${node_arch}..."
+    curl -fsSL "${base_url}/${archive}" -o "${tmpdir}/${archive}"
+    curl -fsSL "${base_url}/SHASUMS256.txt" | grep " ${archive}\$" > "${tmpdir}/SHASUMS256.txt"
+    (cd "${tmpdir}" && sha256sum -c SHASUMS256.txt)
+    echo "Installing Node.js into /usr/local..."
+    sudo tar --strip-components=1 -xJf "${tmpdir}/${archive}" -C /usr/local
+    rm -rf "${tmpdir}"
 }
 
+# NodeSource's setup_14.x installs a stale signing key, so newer Pis use the official tarballs too.
+# dpkg arch, not uname -m: 32-bit Pi OS on a Pi 4 runs a 64-bit kernel.
 install_node_default() {
-    curl -fsSL https://deb.nodesource.com/setup_14.x | sudo -E bash - # configure the NodeSource repo for the Node 14 line
-    sudo apt-get install -y nodejs # install the distro-specific Node.js 14 build (includes npm)
+    local node_arch
+    case "$(dpkg --print-architecture)" in
+        armhf) node_arch="armv7l" ;;
+        arm64) node_arch="arm64" ;;
+        amd64) node_arch="x64" ;;
+        *) echo "Unsupported architecture: $(dpkg --print-architecture)" >&2; exit 1 ;;
+    esac
+    install_node_tarball "${node_arch}" "https://nodejs.org/dist/v${NODE_VERSION}"
 }
 
 ensure_npm() {
@@ -147,9 +158,9 @@ unblock_bluetooth() {
 remove_existing_node # forcibly replace any preinstalled Node.js (e.g., Node 16/18) with the required Node 14 line
 
 if [ "${ARCH}" = "armv6l" ]; then
-    install_node_armv6 # Pi Zero/Zero W path
+    install_node_tarball armv6l "https://unofficial-builds.nodejs.org/download/release/v${NODE_VERSION}" # Pi Zero/Zero W path
 else
-    install_node_default # newer Pis or other architectures use the NodeSource repository
+    install_node_default # newer Pis or other architectures use the official nodejs.org tarballs
 fi
 ensure_npm # guarantee npm exists before we run any npm-based steps below
 

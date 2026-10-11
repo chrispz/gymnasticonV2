@@ -69,6 +69,45 @@ test('createFtmsFilter() accepts any FTMS advertiser unless pinned to a MAC', t 
   t.end();
 });
 
+test('FtmsBikeClient.disconnect() aborts a scan that never matches', async t => {
+  const noble = new EventEmitter();
+  noble.startScanningAsync = async () => {};
+  noble.stopScanning = () => {};
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    const client = new FtmsBikeClient(noble, createFtmsFilter('E0:DF:01:C6:26:80'));
+    const pending = client.connect();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await client.disconnect();
+    await pending.then(() => t.fail('connect should reject'), e => t.match(e.message, /aborted/, 'connect rejects'));
+    t.equal(client.state, 'disconnected', 'client is disconnected');
+  } finally {
+    console.log = originalLog;
+  }
+  t.end();
+});
+
+test('FtmsBikeClient scans without a service UUID filter', async t => {
+  const noble = new EventEmitter();
+  let scannedUuids = 'unset';
+  noble.startScanningAsync = async (uuids) => { scannedUuids = uuids; };
+  noble.stopScanning = () => {};
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    const client = new FtmsBikeClient(noble);
+    const pending = client.connect().catch(() => {});
+    await new Promise(resolve => setTimeout(resolve, 5));
+    t.equal(scannedUuids, null, 'consoles that omit FTMS from their advertisement stay visible');
+    await client.disconnect();
+    await pending;
+  } finally {
+    console.log = originalLog;
+  }
+  t.end();
+});
+
 test('autodetect picks the ftms profile for iConsole+ ahead of ic8', async t => {
   const noble = new EventEmitter();
   noble.startScanningAsync = async () => {};

@@ -451,6 +451,9 @@ const main = async () => {
             shutdownPromise = app.stop().catch((error) => {
                 console.error('[gym-cli] shutdown failed:', error);
                 process.exitCode = 1;
+            }).finally(() => {
+                // Native BLE handles or a pending connect can keep the loop alive; don't make systemd wait for SIGKILL.
+                setTimeout(() => process.exit(), 2000).unref();
             });
         }
         return shutdownPromise;
