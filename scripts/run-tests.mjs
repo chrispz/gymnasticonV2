@@ -3,6 +3,7 @@ import '../src/test/app/app.js';
 import '../src/test/bikes/autodetect.js';
 import '../src/test/bikes/bot.js';
 import '../src/test/bikes/flywheel.js';
+import '../src/test/bikes/ftms.js';
 import '../src/test/bikes/ic4.js';
 import '../src/test/bikes/keiser.js';
 import '../src/test/bikes/peloton.js';

@@ -20,6 +20,9 @@ export const defaults = {
 
   // keiser bike options
   keiserAddress: undefined,      // optional MAC filter for Keiser discovery
+
+  // generic FTMS bike options
+  ftmsAddress: undefined,        // optional MAC filter; otherwise any FTMS advertiser
   
 
   // peloton bike options

@@ -9,6 +9,7 @@ import {BotBikeClient} from './bot.js'; // Simulation/bot mode profile.
 import {macAddress} from '../util/mac-address.js'; // MAC normalization helper used when targeting specific peripherals.
 import {createNameFilter, createAddressFilter} from '../util/ble-scan.js'; // BLE scanning utilities.
 import {Ic8BikeClient} from './ic8.js'; // Schwinn IC8 / Bowflex C6 profile.
+import {FtmsBikeClient, matchesFtmsName, createFtmsFilter} from './ftms.js'; // Generic spec-compliant FTMS profile (e.g. iConsole+).
 
 const FTMS_SERVICE_UUID = '1826'; // Fitness Machine Service exposed by IC8 / Bowflex C6 bikes.
 const CSC_SERVICE_UUID = '1816'; // Cycling Speed and Cadence service exposed by IC8 / Bowflex C6 bikes.
@@ -25,6 +26,7 @@ const NAME_MATCHERS = { // Heuristics used during autodetect to match advertisin
   flywheel: createNameFilter(FLYWHEEL_LOCALNAME), // Flywheel bikes advertise a fixed prefix.
   ic4: matchesIc4OrSchwinn290, // Schwinn IC4 advertises "IC Bike" but Schwinn 290 variants reuse the same FTMS payloads.
   ic5: peripheral => /ic5|life ?fitness/i.test(peripheral?.advertisement?.localName ?? ''), // LifeFitness IC5 patterns.
+  ftms: matchesFtmsName, // Must precede ic8, whose matcher claims any FTMS advertiser.
   ic8: peripheral => /ic8|c6|schwinn|bowflex/i.test(peripheral?.advertisement?.localName ?? '') || advertisesFitnessService(peripheral), // Schwinn IC8 / Bowflex C6 patterns (name or FTMS/CSC service).
   keiser: matchesKeiserName, // Keiser M series broadcasts names that start with "M3".
 };
@@ -50,6 +52,10 @@ function createIc5BikeClient(_options, noble) { // Factory for LifeFitness IC5 b
 
 function createIc8BikeClient(_options, noble) { // Factory for Schwinn IC8 / Bowflex C6 bikes.
   return new Ic8BikeClient({ noble }); // Construct the dedicated IC8 client with the shared noble instance.
+}
+
+function createFtmsBikeClient(options, noble) { // Factory for generic FTMS bikes, optionally pinned to a MAC address.
+  return new FtmsBikeClient(noble, createFtmsFilter(options.ftmsAddress));
 }
 
 function createKeiserBikeClient(options, noble) { // Factory for Keiser bikes that broadcast as beacons.
@@ -95,6 +101,7 @@ const factories = { // Map CLI bike types to factory functions.
   ic4: createIc4BikeClient,
   ic5: createIc5BikeClient,
   ic8: createIc8BikeClient,
+  ftms: createFtmsBikeClient,
   keiser: createKeiserBikeClient,
   bot: createBotBikeClient,
   autodetect: autodetectBikeClient,

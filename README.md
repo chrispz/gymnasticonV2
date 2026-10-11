@@ -130,7 +130,8 @@ Common options:
 
 | Option | Purpose |
 | --- | --- |
-| `bike` | Select a fixed profile such as `flywheel`, `peloton`, `ic4`, `ic5`, `ic8`, `keiser`, `bot`, or `autodetect`. |
+| `bike` | Select a fixed profile such as `flywheel`, `peloton`, `ic4`, `ic5`, `ic8`, `ftms`, `keiser`, `bot`, or `autodetect`. |
+| `ftmsAddress` | Pin the `ftms` profile to one bike by MAC address. |
 | `defaultBike` | Fallback profile when autodetect does not find a supported bike. |
 | `serverName` | Bluetooth advertisement name shown to training apps. |
 | `bikeAdapter` | Bluetooth adapter used to connect to the bike, for example `hci0`. |
@@ -152,6 +153,7 @@ Most users can leave the defaults in place and rely on autodetection.
 | Schwinn 290 recumbent | Bluetooth LE FTMS | Auto-detected through the IC4-compatible FTMS profile. |
 | Keiser M Series (M3i, M3i-TBT, M3iX) | Bluetooth broadcast | Can be filtered by MAC address if needed. |
 | LifeFitness IC5 | Bluetooth LE | Uses the FTMS profile with power estimation where needed. |
+| Abilica SP900 (iConsole+) and other standard FTMS bikes | Bluetooth LE FTMS | `ftms` profile. iConsole+ consoles are auto-detected; for other FTMS bikes set `"bike": "ftms"` (add `ftmsAddress` if several FTMS devices are nearby). |
 
 ## Supported Outputs
 

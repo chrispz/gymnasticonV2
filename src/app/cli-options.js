@@ -47,6 +47,9 @@ export const options = {
   'keiser-address': {
     describe: '<macaddr> optional MAC filter for Keiser discovery',
   },
+  'ftms-address': {
+    describe: '<macaddr> optional MAC filter for generic FTMS bikes',
+  },
   'peloton-path': {
     describe: '<path> usb serial device path',
     type: 'string',
