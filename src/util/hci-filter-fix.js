@@ -20,3 +20,27 @@ export function patchHciFilterSize(hci) {
     hci._isDevUp = null;
   }
 }
+
+// noble asks for a 7.5-15 ms interval on links it opens. On a single radio that also serves a
+// Garmin (150 ms supervision timeout) the controller misses the Garmin's slots and drops it.
+// The bike only notifies at ~2 Hz, so request 30-50 ms instead.
+const LE_CREATE_CONN = [0x01, 0x0d, 0x20, 0x19];
+const CONN_INTERVAL_MIN = 0x0018; // 30 ms (1.25 ms units)
+const CONN_INTERVAL_MAX = 0x0028; // 50 ms
+
+export function patchCentralConnInterval(hci) {
+  const socket = hci?._socket;
+  if (!socket || typeof socket.write !== 'function' || socket.__gymnasticonConnIntervalPatched) {
+    return;
+  }
+  const originalWrite = socket.write.bind(socket);
+  socket.write = (data) => {
+    if (Buffer.isBuffer(data) && data.length === 29 && LE_CREATE_CONN.every((b, i) => data[i] === b)) {
+      data = Buffer.from(data);
+      data.writeUInt16LE(CONN_INTERVAL_MIN, 17);
+      data.writeUInt16LE(CONN_INTERVAL_MAX, 19);
+    }
+    return originalWrite(data);
+  };
+  socket.__gymnasticonConnIntervalPatched = true;
+}

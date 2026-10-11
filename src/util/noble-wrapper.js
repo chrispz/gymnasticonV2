@@ -4,7 +4,7 @@ import {execSync} from 'child_process';
 import path from 'path';
 import {loadDependency, toDefaultExport} from './optional-deps.js';
 import {normalizeAdapterId} from './adapter-id.js';
-import {patchHciFilterSize} from './hci-filter-fix.js';
+import {patchHciFilterSize, patchCentralConnInterval} from './hci-filter-fix.js';
 
 const requireFromWrapper = createRequire(import.meta.url);
 const NOBLE_REQUEST = '@abandonware/noble';
@@ -262,6 +262,7 @@ export const initializeBluetooth = async (adapter = 'hci0', options = {}) => {
     }
 
     patchHciFilterSize(noble?._bindings?._hci);
+    patchCentralConnInterval(noble?._bindings?._hci);
     patchNobleCentralAttRequests();
     patchNobleMtu(noble);
     patchNobleHciInit(noble);
